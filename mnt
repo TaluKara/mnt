@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "Available drives:"
-lsblk
+lsblk -o name,mountpoint,label,size,uuid
 
 read -p "Enter action (add/remove): " ACTION
 read -p "Enter device name (e.g., sdb1): " DEVBASE
