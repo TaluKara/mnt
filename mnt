@@ -1,83 +1,164 @@
 #!/bin/bash
 
-echo "Available drives:"
-lsblk -o name,label,size,type,mountpoint
+usage() {
+    echo "Usage: sudo $0"
+    exit 1
+}
 
-read -p "Enter action (add/remove): " ACTION
-read -p "Enter device name (e.g., sdb1): " DEVBASE
-
-if [[ -z "$ACTION" || -z "$DEVBASE" ]]; then
-    usage
+if [[ "$EUID" -ne 0 ]]; then
+    echo "This script requires sudo privileges. Please enter your password."
+    exec sudo bash "$0" "$@"
 fi
 
-DEVICE="/dev/${DEVBASE}"
+get_partitions() {
+    # Removed the -l option to avoid conflict with -P
+    lsblk -o NAME,LABEL,SIZE,TYPE,MOUNTPOINT -n -P | grep 'TYPE="part"'
+}
 
-MOUNT_POINT=$(/bin/mount | /bin/grep ${DEVICE} | /usr/bin/awk '{ print $3 }')
+display_interface() {
+    clear
+    echo "------------------------------------------------------------------------------------------"
+    printf "%-10s %-20s %-10s %-10s %-20s\n" "NAME" "LABEL" "SIZE" "TYPE" "MOUNTPOINT"
+    echo "------------------------------------------------------------------------------------------"
 
-do_mount()
-{
-    if [[ -n ${MOUNT_POINT} ]]; then
-        echo "Warning: ${DEVICE} is already mounted at ${MOUNT_POINT}"
-        exit 1
+    local index=0
+    for partition in "${PARTITIONS[@]}"; do
+        eval "$partition"
+
+        local display_label="${LABEL:--}"
+        local display_mountpoint="${MOUNTPOINT:--}"
+
+        if [[ "$index" -eq "$CURRENT_SELECTION" ]]; then
+            printf "> %-9s %-20s %-10s %-10s %-20s\n" "$NAME" "$display_label" "$SIZE" "$TYPE" "$display_mountpoint"
+        else
+            printf "  %-9s %-20s %-10s %-10s %-20s\n" "$NAME" "$display_label" "$SIZE" "$TYPE" "$display_mountpoint"
+        fi
+        ((index++))
+    done
+    echo "------------------------------------------------------------------------------------------"
+    echo "Press 'e' to mount, 'r' to unmount, 'q' to quit."
+}
+
+do_mount() {
+    local partition="${PARTITIONS[$CURRENT_SELECTION]}"
+    eval "$partition"
+    DEVICE="/dev/$NAME"
+
+    if [[ -n "$MOUNTPOINT" && "$MOUNTPOINT" != "-" ]]; then
+        echo "Warning: $DEVICE is already mounted at $MOUNTPOINT"
+        sleep 2
+        return
     fi
 
-    eval $(/sbin/blkid -o udev ${DEVICE})
+    eval $(blkid -o udev "$DEVICE")
+    LABEL=${ID_FS_LABEL:-$NAME}
 
-    LABEL=${ID_FS_LABEL}
-    if [[ -z "${LABEL}" ]]; then
-        LABEL=${DEVBASE}
-    elif /bin/grep -q " /media/${LABEL} " /etc/mtab; then
-        LABEL+="-${DEVBASE}"
+    LABEL="${LABEL// /_}"
+
+    if grep -q " /media/$LABEL " /etc/mtab; then
+        LABEL="${LABEL}-$NAME"
     fi
-    MOUNT_POINT="/media/${LABEL}"
+    MOUNT_POINT="/media/$LABEL"
 
-    echo "Mount point: ${MOUNT_POINT}"
-
-    /bin/mkdir -p ${MOUNT_POINT}
+    mkdir -p "$MOUNT_POINT"
 
     OPTS="rw,relatime"
 
-    if [[ ${ID_FS_TYPE} == "vfat" ]]; then
+    if [[ "$ID_FS_TYPE" == "vfat" ]]; then
         OPTS+=",users,gid=100,umask=000,shortname=mixed,utf8=1,flush"
     fi
 
-    if ! /bin/mount -o ${OPTS} ${DEVICE} ${MOUNT_POINT}; then
-        echo "Error mounting ${DEVICE} (status = $?)"
-        /bin/rmdir ${MOUNT_POINT}
-        exit 1
-    fi
-
-    echo "**** Mounted ${DEVICE} at ${MOUNT_POINT} ****"
-}
-
-do_unmount()
-{
-    if [[ -z ${MOUNT_POINT} ]]; then
-        echo "Warning: ${DEVICE} is not mounted"
+    if mount -o "$OPTS" "$DEVICE" "$MOUNT_POINT"; then
+        echo "**** Mounted $DEVICE at $MOUNT_POINT ****"
     else
-        /bin/umount -l ${DEVICE}
-        echo "**** Unmounted ${DEVICE}"
+        echo "Error mounting $DEVICE"
+        rmdir "$MOUNT_POINT"
     fi
-
-    for f in /media/* ; do
-        if [[ -n $(/usr/bin/find "$f" -maxdepth 0 -type d -empty) ]]; then
-            if ! /bin/grep -q " $f " /etc/mtab; then
-                echo "**** Removing mount point $f"
-                /bin/rmdir "$f"
-            fi
-        fi
-    done
+    sleep 2
 }
 
-case "${ACTION}" in
-    add)
-        do_mount
-        ;;
-    remove)
-        do_unmount
-        ;;
-    *)
-        usage
-        ;;
-esac
+do_unmount() {
+    local partition="${PARTITIONS[$CURRENT_SELECTION]}"
+    eval "$partition"
+    DEVICE="/dev/$NAME"
+
+    if [[ -z "$MOUNTPOINT" || "$MOUNTPOINT" == "-" ]]; then
+        echo "Warning: $DEVICE is not mounted"
+        sleep 2
+        return
+    fi
+
+    umount -l "$DEVICE"
+    echo "**** Unmounted $DEVICE ****"
+
+    if [ -d "$MOUNTPOINT" ] && [ -z "$(ls -A "$MOUNTPOINT")" ]; then
+        rmdir "$MOUNTPOINT"
+        echo "**** Removed mount point $MOUNTPOINT ****"
+    fi
+    sleep 2
+}
+
+mapfile -t PARTITIONS < <(get_partitions)
+
+echo "DEBUG: Number of partitions found: ${#PARTITIONS[@]}"
+
+if [[ "${#PARTITIONS[@]}" -eq 0 ]]; then
+    echo "No partitions found. Exiting."
+    exit 1
+fi
+
+CURRENT_SELECTION=0
+TOTAL_PARTITIONS=${#PARTITIONS[@]}
+
+trap "tput cnorm; stty echo; clear; exit" INT TERM EXIT
+
+tput civis
+
+while true; do
+    display_interface
+
+    read -rsn1 key
+
+    if [[ "$key" == $'\x1b' ]]; then
+        read -rsn2 -t 0.1 key2
+        key="$key$key2"
+    fi
+
+    case "$key" in
+        $'\x1b[A')  # up arrow
+            ((CURRENT_SELECTION--))
+            if [[ "$CURRENT_SELECTION" -lt 0 ]]; then
+                CURRENT_SELECTION=$((TOTAL_PARTITIONS - 1))
+            fi
+            ;;
+        $'\x1b[B')  # down arrow
+            ((CURRENT_SELECTION++))
+            if [[ "$CURRENT_SELECTION" -ge "$TOTAL_PARTITIONS" ]]; then
+                CURRENT_SELECTION=0
+            fi
+            ;;
+        e|E)
+            do_mount
+            mapfile -t PARTITIONS < <(get_partitions)
+            TOTAL_PARTITIONS=${#PARTITIONS[@]}
+            if [[ "$CURRENT_SELECTION" -ge "$TOTAL_PARTITIONS" ]]; then
+                CURRENT_SELECTION=$((TOTAL_PARTITIONS - 1))
+            fi
+            ;;
+        r|R)
+            do_unmount
+            mapfile -t PARTITIONS < <(get_partitions)
+            TOTAL_PARTITIONS=${#PARTITIONS[@]}
+            if [[ "$CURRENT_SELECTION" -ge "$TOTAL_PARTITIONS" ]]; then
+                CURRENT_SELECTION=$((TOTAL_PARTITIONS - 1))
+            fi
+            ;;
+        q|Q)
+            break
+            ;;
+    esac
+done
+
+tput cnorm
+clear
 
