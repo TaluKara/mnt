@@ -46,6 +46,7 @@ do_mount() {
 
     if [[ -n "$MOUNTPOINT" && "$MOUNTPOINT" != "-" ]]; then
         echo "Warning: $DEVICE is already mounted at $MOUNTPOINT"
+        read -n 1 -r -p "Press any key to continue..."
         return
     fi
 
@@ -73,6 +74,7 @@ do_mount() {
         echo "Error mounting $DEVICE"
         rmdir "$MOUNT_POINT"
     fi
+    read -n 1 -r -p "Press any key to continue..."
 }
 
 do_unmount() {
@@ -82,6 +84,7 @@ do_unmount() {
 
     if [[ -z "$MOUNTPOINT" || "$MOUNTPOINT" == "-" ]]; then
         echo "Warning: $DEVICE is not mounted"
+        read -n 1 -r -p "Press any key to continue..."
         return
     fi
 
@@ -92,6 +95,7 @@ do_unmount() {
         rmdir "$MOUNTPOINT"
         echo "**** Removed mount point $MOUNTPOINT ****"
     fi
+    read -n 1 -r -p "Press any key to continue..."
 }
 
 mapfile -t PARTITIONS < <(get_partitions)
