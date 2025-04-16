@@ -63,7 +63,9 @@ Ensure you have the necessary sudo privileges, as the script requires them to ma
 - **Down Arrow (`↓`):** Navigate to the next partition.
 - **`e` or `E`:** Mount the selected partition.
 - **`r` or `R`:** Unmount the selected partition.
+- **`d` or `D`:** Copies the mountpoint in to the system clipboard.
 - **`q` or `Q`:** Quit the script.
+
 
 ### Example Interface
 
@@ -75,7 +77,7 @@ NAME       LABEL                SIZE       TYPE       MOUNTPOINT
 > sda2      Data                 500G      part      -
   sdb1      Backup               250G      part      /mnt/backup        
 ------------------------------------------------------------------------------------------
-Press 'e' to mount, 'r' to unmount, 'q' to quit.
+Press 'e' to mount, 'r' to unmount, 'd' to copy, 'q' to quit.
 ```
 
 In this example, the currently selected partition is highlighted with a `>` symbol. Use the arrow keys to change the selection and press the corresponding key to perform actions.
@@ -85,7 +87,7 @@ In this example, the currently selected partition is highlighted with a `>` symb
 - **Operating System:** Linux
 - **Shell:** Bash
 - **Permissions:** Sudo privileges are required to execute mount and unmount operations.
-- **Dependencies:** Utilizes standard Linux utilities like `lsblk`, `blkid`, `mount`, and `umount`.
+- **Dependencies:** Utilizes standard Linux utilities like `lsblk`, `blkid`, `mount`, `umount` and `xclip` or `xsel` or `wl-copy`.
 
 ## Contributing
 
